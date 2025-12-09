@@ -1,67 +1,46 @@
 pipeline {
     agent any
     environment {
-        IMAGE = "trabelsinour/atelierdevops"
-        TAG   = "${env.BUILD_NUMBER}"
+        IMAGE_NAME = "trabelsinour/atelierdevops"
+        IMAGE_TAG  = "${env.BUILD_NUMBER}"
+        IMAGE      = "${IMAGE_NAME}:${IMAGE_TAG}"
+        IMAGE_LATEST = "${IMAGE_NAME}:latest"
+        // MET ICI L'ID EXACT DE TA CREDENTIAL DOCKER HUB (très important)
+        DOCKER_CRED = "dockerhub-trabelsi"     // change si ton ID est différent
     }
     stages {
-        stage('Création du projet en local') {
+        stage('Checkout') { steps { checkout scm } }
+
+        stage('Maven Build') {
             steps {
-                sh '''
-                    mkdir -p src/main/java/hello
-                    echo 'public class Hello {
-                        public static void main(String[] a) {
-                            System.out.println("Pipeline CI/CD validée 20/20 !");
-                        }
-                    }' > src/main/java/hello/Hello.java
-
-                    cat > pom.xml <<EOF
-<project xmlns="http://maven.apache.org/POM/4.0.0">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>tn.esprit</groupId>
-  <artifactId>atelier</artifactId>
-  <version>1.0</version>
-  <properties>
-    <maven.compiler.source>17</maven.compiler.source>
-    <maven.compiler.target>17</maven.compiler.target>
-  </properties>
-</project>
-EOF
-
-                    cat > Dockerfile <<EOF
-FROM eclipse-temurin:17-jre-alpine
-COPY target/app.jar app.jar
-ENTRYPOINT ["java","-jar","app.jar"]
-EOF
-                '''
+                sh 'chmod +x ./mvnw'
+                sh './mvnw clean package -DskipTests'
             }
         }
 
-        stage('Maven Build (simulation)') {
+        stage('Docker Build') {
             steps {
-                sh 'mkdir -p target && echo "fake jar" > target/app.jar'
+                script {
+                    docker.build(IMAGE)
+                    docker.build(IMAGE_LATEST)
+                }
             }
         }
 
-        stage('Docker Build & Push') {
+        stage('Docker Push') {
             steps {
-                withCredentials([usernamePassword(credentialsId: '29de80613b254b71a33df3303dced42b',
-                                 usernameVariable: 'U', passwordVariable: 'P')]) {
-                    sh '''
-                        docker build -t ${IMAGE}:${TAG} .
-                        docker tag ${IMAGE}:${TAG} ${IMAGE}:latest
-                        echo "$P" | docker login -u "$U" --password-stdin
-                        docker push ${IMAGE}:${TAG}
-                        docker push ${IMAGE}:latest
-                        echo "IMAGES PUBLIÉES → https://hub.docker.com/r/${IMAGE}"
-                    '''
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CRED) {
+                        docker.image(IMAGE).push()
+                        docker.image(IMAGE_LATEST).push()
+                    }
                 }
             }
         }
     }
-
     post {
         always { cleanWs() }
-        success { echo "20/20 GARANTI – Même sans Internet !" }
+        success { echo "20/20 – https://hub.docker.com/r/${IMAGE_NAME}" }
+        failure { echo "Échec – vérifie l'ID Docker dans DOCKER_CRED" }
     }
 }
